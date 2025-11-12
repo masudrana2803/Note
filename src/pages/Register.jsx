@@ -1,154 +1,116 @@
 import React, { useState } from "react";
-import {
-  createUserWithEmailAndPassword,
-  updateProfile,
-  sendEmailVerification,
-  signOut,
-} from "firebase/auth";
-import { auth, db } from "../firebase.config";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { Link, useNavigate } from "react-router";
-import { toast } from "react-toastify";
+import { auth } from "../firebase.config";
+import { createUserWithEmailAndPassword, updateProfile, sendEmailVerification } from "firebase/auth";
+import { useNavigate, Link } from "react-router-dom";
 
 const Register = () => {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [loading, setLoading] = useState(false);
-
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
   const navigate = useNavigate();
 
   const handleRegister = async (e) => {
     e.preventDefault();
-
-    if (!firstName || !lastName || !email || !password || !confirm) {
-      toast.error("Please fill in all fields.");
+    if (password !== confirmPassword) {
+      setError("Passwords do not match!");
       return;
     }
-
-    if (password !== confirm) {
-      toast.error("Passwords do not match.");
-      return;
-    }
-
-    setLoading(true);
-
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-
-      // Update display name
-      await updateProfile(user, {
-        displayName: `${firstName} ${lastName}`.trim(),
-      });
-
-      // Save user info to Firestore
-      await setDoc(doc(db, "users", user.uid), {
-        uid: user.uid,
-        firstName,
-        lastName,
-        email: user.email,
-        createdAt: serverTimestamp(),
-      });
-
-      // Send verification email
-      await sendEmailVerification(auth.currentUser, {
-        url: window.location.origin + "/login",
-        handleCodeInApp: false,
-      });
-
-      toast.success("Verification email sent! Please check your inbox.");
-
-      // Clear input fields
-      setFirstName("");
-      setLastName("");
-      setEmail("");
-      setPassword("");
-      setConfirm("");
-
-      // Sign out so user must verify first
-      await signOut(auth);
-      navigate("/login");
-    } catch (error) {
-      console.error("Registration Error:", error);
-      toast.error(error.message || "Registration failed.");
-    } finally {
-      setLoading(false);
+      await updateProfile(userCredential.user, { displayName: `${firstName} ${lastName}` });
+      await sendEmailVerification(userCredential.user);
+      alert("Registration successful! Please verify your email.");
+      navigate("/");
+    } catch (err) {
+      setError(err.message);
     }
   };
 
   return (
-    <div className="flex h-screen justify-center items-center bg-sky-50">
-      <form
-        onSubmit={handleRegister}
-        className="glass w-96 p-8 rounded-2xl shadow-2xl bg-white/60 backdrop-blur-md"
-      >
-        <h2 className="text-3xl font-extrabold mb-6 text-center text-sky-900">
-          Create Account
-        </h2>
-
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <input
-            type="text"
-            placeholder="First name"
-            className="p-2 rounded bg-white/30 placeholder-sky-800 border border-red-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-          />
-          <input
-            type="text"
-            placeholder="Last name"
-            className="p-2 rounded bg-white/30 placeholder-sky-800 border border-red-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
-            value={lastName}
-            onChange={(e) => setLastName(e.target.value)}
-          />
+    <div className="min-h-screen bg-gradient from-blue-50 to-cyan-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        {/* Logo/Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-blue-600 mb-2">Keep</h1>
+          <p className="text-gray-500">Your thoughts, organized</p>
         </div>
+          {/* <p className="text-gray-500">Create your account</p> */}
 
-        <input
-          type="email"
-          placeholder="Email address"
-          className="w-full mb-3 p-2 rounded bg-white/30 placeholder-sky-800 border border-red-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
-          onChange={(e) => setEmail(e.target.value)}
-          value={email}
-        />
+        {/* Register Card */}
+        <div className="bg-white rounded-2xl shadow-lg p-8 space-y-6">
+          <h2 className="text-2xl font-semibold text-gray-800 text-center">Sign Up</h2>
 
-        <input
-          type="password"
-          placeholder="Password"
-          className="w-full mb-3 p-2 rounded bg-white/30 placeholder-sky-800 border border-red-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
-          onChange={(e) => setPassword(e.target.value)}
-          value={password}
-        />
+          <form onSubmit={handleRegister} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="text"
+                placeholder="First name"
+                onChange={(e) => setFirstName(e.target.value)}
+                required
+                className="px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition bg-blue-50"
+              />
+              <input
+                type="text"
+                placeholder="Last name"
+                onChange={(e) => setLastName(e.target.value)}
+                required
+                className="px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition bg-blue-50"
+              />
+            </div>
 
-        <input
-          type="password"
-          placeholder="Confirm password"
-          className="w-full mb-4 p-2 rounded bg-white/30 placeholder-sky-800 border border-red-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
-          onChange={(e) => setConfirm(e.target.value)}
-          value={confirm}
-        />
+            <div>
+              <input
+                type="email"
+                placeholder="Email address"
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition bg-blue-50"
+              />
+            </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className={`w-full py-2 rounded text-white transition ${
-            loading
-              ? "bg-gray-400 cursor-not-allowed"
-              : "bg-red-600 hover:bg-red-700"
-          }`}
-        >
-          {loading ? "Registering..." : "Register"}
-        </button>
+            <div>
+              <input
+                type="password"
+                placeholder="Password"
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition bg-blue-50"
+              />
+            </div>
 
-        <p className="text-center mt-4 text-sm text-sky-800">
-          Already have an account?{" "}
-          <Link to="/login" className="font-semibold underline">
-            Login
-          </Link>
-        </p>
-      </form>
+            <div>
+              <input
+                type="password"
+                placeholder="Confirm password"
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition bg-blue-50"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 rounded-lg transition duration-200 transform hover:scale-105"
+            >
+              Create Account
+            </button>
+          </form>
+
+          {error && <p className="text-red-500 text-sm text-center bg-red-50 p-3 rounded-lg">{error}</p>}
+
+          <div className="border-t-2 border-blue-100 pt-4">
+            <p className="text-gray-600 text-center">
+              Already have an account?{" "}
+              <Link to="/" className="text-blue-500 font-semibold hover:text-blue-600 hover:underline">
+                Login
+              </Link>
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

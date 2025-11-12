@@ -1,165 +1,152 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useState, useEffect } from "react";
+import { auth, db } from "../firebase.config";
+import {
+  collection,
+  addDoc,
+  onSnapshot,
+  deleteDoc,
+  doc,
+  getDocs,
+  serverTimestamp,
+} from "firebase/firestore";
 import Navbar from "../components/Navbar";
-import { collection, query, where, getDocs, deleteDoc, doc, updateDoc, onSnapshot } from "firebase/firestore";
-import { db, auth } from "../firebase.config";
-import { useAuth } from "../context/AuthContext";
-import { toast } from "react-toastify";
+import NoteCard from "../components/NoteCard";
+import { useNavigate } from "react-router-dom";
 
 const Trash = () => {
-  const [trash, setTrash] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const { isAdmin } = useAuth();
+  const [trash, setTrash] = useState([]); // All deleted notes
+  const user = auth.currentUser;
+  const navigate = useNavigate();
 
+  // 🧩 Listen to user's Trash notes in real time
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!user) return;
+    const trashRef = collection(db, "users", user.uid, "trash");
 
-    setLoading(true);
-    let q;
-
-    // Admin sees all deleted notes; users see only their own
-    if (isAdmin) {
-      q = query(collection(db, "notes"), where("isDeleted", "==", true));
-    } else {
-      q = query(
-        collection(db, "notes"),
-        where("userId", "==", auth.currentUser.uid),
-        where("isDeleted", "==", true)
-      );
-    }
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setTrash(
-        snapshot.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .sort((a, b) => (b.createdAt?.toDate() || 0) - (a.createdAt?.toDate() || 0))
-      );
-      setLoading(false);
+    const unsub = onSnapshot(trashRef, (snapshot) => {
+      const fetched = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setTrash(fetched);
     });
 
-    return unsubscribe;
-  }, [isAdmin]);
+    return () => unsub();
+  }, [user]);
 
-  const recoverNote = useCallback(async (id) => {
-    try {
-      const noteRef = doc(db, "notes", id);
-      await updateDoc(noteRef, { isDeleted: false });
-      toast.success("Note recovered");
-    } catch (error) {
-      toast.error("Error recovering note: " + error.message);
-      console.error("Error recovering note:", error);
-    }
-  }, []);
+  // ♻️ Recover one note from Trash → Notes
+  const recoverNote = async (note) => {
+    const trashDocRef = doc(db, "users", user.uid, "trash", note.id);
+    const notesRef = collection(db, "users", user.uid, "notes");
 
-  const deletePermanently = useCallback(async (id) => {
-    try {
-      await deleteDoc(doc(db, "notes", id));
-      toast.success("Note deleted permanently");
-    } catch (error) {
-      toast.error("Error deleting note: " + error.message);
-      console.error("Error deleting note:", error);
-    }
-  }, []);
+    // ✅ Clean the note object before re-adding
+    const { id, deletedAt, ...rest } = note;
 
-  const deleteAll = useCallback(async () => {
-    try {
-      await Promise.all(trash.map((n) => deleteDoc(doc(db, "notes", n.id))));
-      toast.success("All notes deleted");
-    } catch (error) {
-      toast.error("Error deleting all notes: " + error.message);
-      console.error("Error deleting all:", error);
-    }
-  }, [trash]);
+    await addDoc(notesRef, {
+      ...rest,
+      restoredAt: serverTimestamp(),
+    });
 
-  const recoverAll = useCallback(async () => {
-    try {
-      await Promise.all(
-        trash.map((n) => updateDoc(doc(db, "notes", n.id), { isDeleted: false }))
-      );
-      toast.success("All notes recovered");
-    } catch (error) {
-      toast.error("Error recovering all notes: " + error.message);
-      console.error("Error recovering all:", error);
-    }
-  }, [trash]);
+    // Delete from Trash
+    await deleteDoc(trashDocRef);
 
-  const colorMap = useMemo(
-    () => ({
-      yellow: "bg-yellow-100",
-      blue: "bg-blue-100",
-      pink: "bg-pink-100",
-      green: "bg-green-100",
-      purple: "bg-purple-100",
-      orange: "bg-orange-100",
-    }),
-    []
-  );
+    // Update UI instantly
+    setTrash((prev) => prev.filter((n) => n.id !== note.id));
+  };
+
+  // ☠️ Permanently delete one note
+  const deletePermanently = async (noteId) => {
+    const trashDocRef = doc(db, "users", user.uid, "trash", noteId);
+    await deleteDoc(trashDocRef);
+
+    // Instantly update UI
+    setTrash((prev) => prev.filter((n) => n.id !== noteId));
+  };
+
+  // ♻️ Recover All notes
+  const recoverAll = async () => {
+    const trashRef = collection(db, "users", user.uid, "trash");
+    const notesRef = collection(db, "users", user.uid, "notes");
+    const snapshot = await getDocs(trashRef);
+
+    const promises = snapshot.docs.map(async (docSnap) => {
+      const { id, deletedAt, ...data } = docSnap.data();
+      await addDoc(notesRef, {
+        ...data,
+        restoredAt: serverTimestamp(),
+      });
+      await deleteDoc(docSnap.ref);
+    });
+
+    await Promise.all(promises);
+    setTrash([]); // Clear UI after recovery
+  };
+
+  // ☠️ Delete All permanently
+  const deleteAll = async () => {
+    const trashRef = collection(db, "users", user.uid, "trash");
+    const snapshot = await getDocs(trashRef);
+
+    const promises = snapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
+    await Promise.all(promises);
+    setTrash([]); // Clear UI
+  };
 
   return (
-    <div>
+    <>
       <Navbar />
-      <div className="p-6 max-w-7xl mx-auto">
-        {trash.length > 0 && (
-          <div className="flex justify-between mb-6 gap-2">
-            <button
-              onClick={recoverAll}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition font-semibold"
-            >
-              Recover All
-            </button>
-            <button
-              onClick={deleteAll}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition font-semibold"
-            >
-              Delete All
-            </button>
-          </div>
-        )}
+      <div className="min-h-screen bg-gradient from-red-50 to-pink-50 pb-12">
+        {/* Header */}
+        <div className="max-w-7xl mx-auto px-6 py-8 flex items-center justify-between border-b-2 border-red-100">
+          <h2 className="text-4xl font-bold text-gray-800">🗑️ Trash Bin</h2>
+          <button
+            onClick={() => navigate("/notes")}
+            className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition duration-200 transform hover:scale-105"
+          >
+            ← Back to Notes
+          </button>
+        </div>
 
-        {loading ? (
-          <div className="text-center py-8">
-            <p className="text-gray-500">Loading trash...</p>
-          </div>
-        ) : trash.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-gray-500">Trash is empty</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {trash.map((note) => (
-              <div
-                key={note.id}
-                className={`${colorMap[note.color] || colorMap.yellow} p-4 rounded-lg shadow-md flex flex-col justify-between`}
-              >
-                <div>
-                  {note.title && <h3 className="font-bold text-lg mb-2 text-gray-800">{note.title}</h3>}
-                  {note.description && <p className="text-gray-700 mb-2">{note.description}</p>}
-                  {note.text && <p className="text-sm text-gray-600">{note.text}</p>}
-                  {note.createdAt && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      {new Date(note.createdAt.toDate()).toLocaleDateString()}
-                    </p>
-                  )}
-                </div>
-                <div className="flex gap-3 mt-4">
-                  <button
-                    onClick={() => recoverNote(note.id)}
-                    className="flex-1 bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700 transition text-sm font-semibold"
-                  >
-                    Recover
-                  </button>
-                  <button
-                    onClick={() => deletePermanently(note.id)}
-                    className="flex-1 bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 transition text-sm font-semibold"
-                  >
-                    Delete
-                  </button>
-                </div>
+        {/* Trash List */}
+        <div className="max-w-7xl mx-auto px-6">
+          {trash.length > 0 ? (
+            <>
+              <div className="flex flex-wrap gap-6 justify-center mt-6">
+                {trash.map((note) => (
+                  <NoteCard
+                    key={note.id}
+                    note={note}
+                    isTrash
+                    onRecover={() => recoverNote(note)}
+                    onDelete={() => deletePermanently(note.id)}
+                  />
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+
+              {/* Buttons: Recover All / Delete All */}
+              <div className="flex gap-4 justify-center mt-10">
+                <button
+                  onClick={recoverAll}
+                  className="px-8 py-3 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg transition"
+                >
+                  ♻️ Recover All
+                </button>
+                <button
+                  onClick={deleteAll}
+                  className="px-8 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg transition"
+                >
+                  ☠️ Delete All
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-16 text-gray-500 text-2xl">
+              No notes in trash 🧹
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 

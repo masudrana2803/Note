@@ -1,235 +1,218 @@
-import React, { useEffect, useState, useCallback } from "react";
-import Navbar from "../components/Navbar";
-import NoteCard from "../components/NoteCard";
-import { db, auth } from "../firebase.config";
+import React, { useState, useEffect } from "react";
+import { auth, db } from "../firebase.config";
 import {
   collection,
   addDoc,
-  query,
-  where,
-  updateDoc,
-  doc,
-  serverTimestamp,
   onSnapshot,
+  serverTimestamp,
+  deleteDoc,
+  doc,
+  updateDoc,
 } from "firebase/firestore";
-import { useAuth } from "../context/AuthContext";
-import { toast } from "react-toastify";
-
-const colorOptions = [
-  { name: "yellow", bg: "bg-yellow-300", label: "Yellow" },
-  { name: "blue", bg: "bg-blue-300", label: "Blue" },
-  { name: "pink", bg: "bg-pink-300", label: "Pink" },
-  { name: "green", bg: "bg-green-300", label: "Green" },
-  { name: "purple", bg: "bg-purple-300", label: "Purple" },
-  { name: "orange", bg: "bg-orange-300", label: "Orange" },
-];
+import Navbar from "../components/Navbar";
+import NoteCard from "../components/NoteCard";
+import { useNavigate } from "react-router-dom";
 
 const Notes = () => {
-  const [notes, setNotes] = useState([]);
-  const [title, setTitle] = useState("");
-  const [text, setText] = useState("");
-  const [selectedColor, setSelectedColor] = useState("yellow");
-  const [loading, setLoading] = useState(true);
-  const { user, isAdmin, isOnline } = useAuth();
+  // 🧠 Local state
+  const [title, setTitle] = useState(""); // Note title
+  const [desc, setDesc] = useState(""); // Note description
+  const [color, setColor] = useState("#ffffff"); // Background color for note
+  const [notes, setNotes] = useState([]); // List of all active notes
+  const [editNote, setEditNote] = useState(null); // Currently edited note
 
-  // Fetch notes in real-time
+  const user = auth.currentUser; // Get currently logged-in Firebase user
+  const navigate = useNavigate(); // For navigating between Notes and Trash pages
+
+  // 🔹 Fetch all notes in real time for this user
   useEffect(() => {
-    if (!user) return;
-    setLoading(true);
+    if (!user) return; // Stop if user is not yet loaded
 
-    const q = isAdmin
-      ? query(collection(db, "notes"), where("isDeleted", "==", false))
-      : query(
-          collection(db, "notes"),
-          where("userId", "==", user.uid),
-          where("isDeleted", "==", false)
-        );
+    const notesRef = collection(db, "users", user.uid, "notes");
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    // Real-time Firestore listener
+    const unsub = onSnapshot(notesRef, (snapshot) => {
       const fetchedNotes = snapshot.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .sort(
-          (a, b) =>
-            (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0)
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .filter(
+          (note) =>
+            // ✅ Only show valid notes
+            note &&
+            typeof note.title === "string" &&
+            typeof note.description === "string" &&
+            note.title.trim() !== "" &&
+            note.description.trim() !== "" &&
+            !note.deletedAt // exclude deleted/trash items accidentally left behind
         );
-      setNotes(fetchedNotes);
-      setLoading(false);
+
+      setNotes(fetchedNotes); // Update local state
     });
 
-    return unsubscribe;
-  }, [user, isAdmin]);
+    // Cleanup listener on component unmount
+    return () => unsub();
+  }, [user]);
 
-  // Add new note with retry/backoff and verbose logging
-  const addNote = useCallback(async () => {
-    if (!title.trim() && !text.trim()) {
-      toast.error("Please add at least a title or note text");
+  // ➕ Add a new note
+  const addNote = async () => {
+    if (!title || !desc) {
+      alert("Please fill in both title and description!");
       return;
     }
 
-    if (!user) {
-      toast.error("You must be signed in to add notes.");
-      console.warn("Notes.addNote attempted with no user");
-      return;
-    }
+    const notesRef = collection(db, "users", user.uid, "notes");
 
-    if (!isOnline) {
-      toast.error("Browser is offline. Please check your network connection.");
-      console.warn("Notes.addNote attempted while offline, navigator.onLine=", navigator.onLine);
-      return;
-    }
-
-    const payload = {
-      title: title.trim(),
-      text: text.trim(),
-      color: selectedColor,
-      userId: user.uid,
-      isDeleted: false,
+    // Create a new note document in Firestore
+    await addDoc(notesRef, {
+      uid: user.uid,
+      title,
+      description: desc,
+      color,
       createdAt: serverTimestamp(),
-    };
+    });
 
-    // Debug: log current user and auth options
-    console.log("Notes.addNote: starting write attempt");
-    console.log("Notes.addNote: navigator.onLine=", navigator.onLine);
-    console.log("Notes.addNote: isOnline from context=", isOnline);
-    try {
-      console.log("Notes.addNote: auth.app.options=", auth && auth.app && auth.app.options);
-    } catch (e) {
-      console.warn("Could not read auth.app.options", e);
-    }
-    console.log("Notes.addNote: auth.currentUser=", auth?.currentUser || null);
-    console.log("Notes.addNote: user=", user?.uid);
-    console.log("Notes.addNote: payload=", payload);
-
-    const maxAttempts = 3;
-    let lastErr = null;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        console.log(`Notes.addNote: attempt ${attempt + 1}/${maxAttempts}`);
-        await addDoc(collection(db, "notes"), payload);
-        lastErr = null;
-        console.log("Notes.addNote: addDoc succeeded on attempt", attempt + 1);
-        break;
-      } catch (err) {
-        lastErr = err;
-        console.error(`Notes.addNote: attempt ${attempt + 1} failed:`, err);
-        console.error(`Notes.addNote: error code=`, err?.code);
-        console.error(`Notes.addNote: error message=`, err?.message);
-        const msg = (err && err.message ? String(err.message) : "").toLowerCase();
-        if (
-          msg.includes("client is offline") ||
-          msg.includes("unavailable") ||
-          msg.includes("deadline-exceeded") ||
-          msg.includes("network")
-        ) {
-          const waitMs = 500 * Math.pow(2, attempt);
-          console.log(`Notes.addNote: transient error, waiting ${waitMs}ms before retry`);
-          await new Promise((res) => setTimeout(res, waitMs));
-          continue; // retry
-        }
-        // non-transient error, break out
-        console.log(`Notes.addNote: non-transient error, stopping retries`);
-        break;
-      }
-    }
-
-    if (lastErr) {
-      console.error("Notes.addNote: failed after all retries:", lastErr);
-      toast.error("Error adding note: " + (lastErr.message || lastErr));
-      return;
-    }
-
-    // Reset fields after success
+    // Clear inputs after adding
     setTitle("");
-    setText("");
-    setSelectedColor("yellow");
+    setDesc("");
+    setColor("#ffffff");
+  };
 
-    toast.success("Note added successfully!");
-  }, [title, text, selectedColor, user]);
+  // ✏️ Start editing a note
+  const startEdit = (note) => {
+    setEditNote(note);
+    setTitle(note.title);
+    setDesc(note.description);
+    setColor(note.color);
+  };
 
-  // Delete (soft delete) note
-  const deleteNote = useCallback(async (id) => {
-    try {
-      const noteRef = doc(db, "notes", id);
-      await updateDoc(noteRef, { isDeleted: true });
-      toast.success("Note moved to trash");
-    } catch (error) {
-      console.error("Error deleting note:", error);
-      toast.error("Error deleting note: " + error.message);
-    }
-  }, []);
+  // 💾 Save updated note
+  const updateNote = async () => {
+    if (!editNote) return;
+
+    const noteRef = doc(db, "users", user.uid, "notes", editNote.id);
+    await updateDoc(noteRef, {
+      title,
+      description: desc,
+      color,
+      updatedAt: serverTimestamp(),
+    });
+
+    // Reset fields after update
+    setEditNote(null);
+    setTitle("");
+    setDesc("");
+    setColor("#ffffff");
+  };
+
+  // 🗑️ Move a note to Trash (not permanent deletion)
+  const moveToTrash = async (note) => {
+    const noteRef = doc(db, "users", user.uid, "notes", note.id);
+    const trashRef = collection(db, "users", user.uid, "trash");
+
+    // Copy note to Trash collection with timestamp
+    await addDoc(trashRef, { ...note, deletedAt: serverTimestamp() });
+
+    // Remove it from Notes collection
+    await deleteDoc(noteRef);
+
+    // Optional: instant local update for smooth UX
+    setNotes((prev) => prev.filter((n) => n.id !== note.id));
+  };
 
   return (
-    <div>
+    <>
+      {/* 🔝 Navigation bar */}
       <Navbar />
-      <div className="p-6 max-w-7xl mx-auto">
-        {/* Note creation area */}
-        <div className="bg-white p-6 rounded-lg shadow-lg mb-6 sticky top-20 z-40">
-          <h2 className="text-xl font-bold mb-4 text-gray-800">Create Note</h2>
 
-          <div className="flex flex-col md:flex-row gap-4 mb-4">
-            <input
-              className="flex-1 border-2 border-gray-300 rounded-lg p-3 focus:outline-none focus:border-blue-500 transition"
-              placeholder="Note title..."
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
+      <div className="min-h-screen bg-gradient from-blue-50 to-cyan-50 pb-12">
+        {/* 🧩 Header section with Trash navigation */}
+        <div className="max-w-7xl mx-auto px-6 py-8 flex items-center justify-between border-b-2 border-blue-100">
+          <h2 className="text-4xl font-bold text-gray-800">📝 Your Notes</h2>
 
-            <textarea
-              className="flex-1 border-2 border-gray-300 rounded-lg p-3 focus:outline-none focus:border-blue-500 transition resize-none h-24"
-              placeholder="Add note content..."
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-            />
-          </div>
-
-          {/* Color selector */}
-          <div className="flex items-center gap-3 mb-4">
-            <label className="font-semibold text-gray-700">Color:</label>
-            <div className="flex gap-2">
-              {colorOptions.map((color) => (
-                <button
-                  key={color.name}
-                  onClick={() => setSelectedColor(color.name)}
-                  className={`w-8 h-8 ${color.bg} rounded-full border-4 ${
-                    selectedColor === color.name
-                      ? "border-gray-800 scale-110"
-                      : "border-gray-300"
-                  } transition-all`}
-                  title={color.label}
-                />
-              ))}
-            </div>
-          </div>
-
+          {/* Go to Trash page */}
           <button
-            onClick={addNote}
-            className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition font-semibold"
+            onClick={() => navigate("/trash")}
+            className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition duration-200 transform hover:scale-105"
           >
-            Add Note
+            🗑️ Go to Trash
           </button>
         </div>
 
-        {/* Notes display area */}
-        {loading ? (
-          <div className="text-center py-8">
-            <p className="text-gray-500">Loading notes...</p>
+        {/* ✍️ Create / Edit form */}
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          <div className="bg-white rounded-2xl shadow-md p-8 border-2 border-blue-100 space-y-6">
+            <h3 className="text-xl font-semibold text-gray-800">
+              {editNote ? "✏️ Edit Note" : "Create a New Note"}
+            </h3>
+
+            {/* Title input */}
+            <input
+              type="text"
+              placeholder="Note title..."
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 bg-blue-50"
+            />
+
+            {/* Description textarea */}
+            <textarea
+              placeholder="Write your note..."
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 bg-blue-50 resize-none h-32"
+            />
+
+            {/* Form buttons */}
+            <div className="flex gap-4">
+              {editNote ? (
+                // Update button if editing
+                <button
+                  onClick={updateNote}
+                  className="flex-1 bg-green-500 hover:bg-green-600 text-white font-semibold py-3 rounded-lg transition"
+                >
+                  ✔️ Update Note
+                </button>
+              ) : (
+                // Add button if new note
+                <button
+                  onClick={addNote}
+                  className="w-1/4 bg-blue-400 hover:bg-blue-600 text-white font-semibold py-3 rounded-lg transition"
+                >
+                  + Add Note
+                </button>
+              )}
+
+              {/* Cancel editing */}
+              {editNote && (
+                <button
+                  onClick={() => {
+                    setEditNote(null);
+                    setTitle("");
+                    setDesc("");
+                  }}
+                  className="px-6 bg-gray-400 hover:bg-gray-500 text-white font-semibold py-3 rounded-lg transition"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           </div>
-        ) : notes.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-gray-500">No notes yet. Create one above!</p>
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-4 justify-center md:justify-start">
+        </div>
+
+        {/* 🗂️ Notes List */}
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex flex-wrap gap-6 justify-center">
             {notes.map((note) => (
-              <div key={note.id} className="w-full sm:w-[48%] md:w-[31%] lg:w-[23%]">
-                <NoteCard note={note} onDelete={() => deleteNote(note.id)} />
-              </div>
+              <NoteCard
+                key={note.id}
+                note={note}
+                onDelete={() => moveToTrash(note)} // Move note to trash
+                onEdit={() => startEdit(note)} // Edit existing note
+              />
             ))}
           </div>
-        )}
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 

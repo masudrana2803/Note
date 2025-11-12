@@ -1,23 +1,35 @@
-import React, { memo } from "react";
-import { Link } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import React from "react";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase.config";
+import { useNavigate } from "react-router-dom";
 
-const Navbar = memo(() => {
-  const { user, isAdmin, logout } = useAuth();
+const Navbar = () => {
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    navigate("/");
+  };
 
   return (
-    <nav className="bg-blue-600 text-white flex justify-between items-center px-6 py-3 shadow-md">
-      <h1 className="font-bold text-lg">Google Notes Clone</h1>
-      <div className="flex gap-4 items-center">
-        <Link to="/" className="hover:underline">Notes</Link>
-        <Link to="/trash" className="hover:underline">Trash</Link>
-        {isAdmin && <span className="bg-red-500 px-3 py-1 rounded text-sm font-semibold">Admin</span>}
-        {user && <button onClick={logout} className="bg-red-500 px-3 py-1 rounded hover:bg-red-600 transition">Logout</button>}
+    <nav className="sticky top-0 z-50 bg-white border-b-2 border-blue-100 shadow-sm">
+      <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-gradient from-blue-400 to-cyan-500 rounded-full flex items-center justify-center">
+            <span className="text-white font-bold text-lg">K</span>
+          </div>
+          <h1 className="text-2xl font-bold text-gray-800">Keep</h1>
+        </div>
+
+        <button
+          onClick={handleLogout}
+          className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition duration-200 transform hover:scale-105"
+        >
+          Logout
+        </button>
       </div>
     </nav>
   );
-});
-
-Navbar.displayName = "Navbar";
+};
 
 export default Navbar;
