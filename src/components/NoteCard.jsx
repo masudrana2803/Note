@@ -63,7 +63,7 @@ const NoteCard = ({ note, onDelete, onEdit, onRecover, isTrash }) => {
               title="Recover this note"
               className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium shadow-sm transition active:scale-95"
             >
-              ♻️ Recover
+              Recover
             </button>
 
             {/* Permanently Delete Button */}
@@ -72,7 +72,7 @@ const NoteCard = ({ note, onDelete, onEdit, onRecover, isTrash }) => {
               title="Delete permanently"
               className="px-4 py-1 bg-red-400 hover:bg-red-700 text-white rounded-lg font-medium shadow-sm transition active:scale-95"
             >
-              ❌ Delete
+              Delete
             </button>
           </>
         )}
