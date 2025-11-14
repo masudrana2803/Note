@@ -21,12 +21,21 @@ const Navbar = () => {
           <h1 className="text-2xl font-bold text-gray-800">Keep</h1>
         </div>
 
-        <button
-          onClick={handleLogout}
-          className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition duration-200 transform hover:scale-105"
-        >
-          Logout
-        </button>
+        <div className="flex items-center gap-4">
+          {/* <button
+            onClick={() => navigate("/profile")}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+          >
+            Profile
+          </button> */}
+
+          <button
+            onClick={handleLogout}
+            className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg transition duration-200 transform hover:scale-105"
+          >
+            Logout
+          </button>
+        </div>
       </div>
     </nav>
   );
